@@ -1,61 +1,69 @@
-function [s,z,Bx] = SimplexMatricial(A,c,b,Bx)
-    [~,n] = size(A);
-    r = inf*ones(n,1);     % r = costos reducidos
-    d = 1;                 % d = direccion simplex
-    theta = inf;           % theta = razon minima
+function [s, z, Bx] = SimplexMatricial(A, c, b, Bx)
+    [m,n] = size(A);
+    tol = 1e-8; % Tolerancia mayor a eps para estabilidad
+    % Primer factorización para entrar al while
+    B = A(:, Bx);
+    [L, U, p] = lups(B);
+    % Se calcula lam para obtener r
+    cB = c(Bx);
+    w = forsub(U', cB);
+    v = backsub(L', w);         % Se calculan los multiplicadores
+    lambda = zeros(m, 1); 
+    lambda(p) = v;              % Se aplica permutación inversa
+    
+    r = c - A'*lambda;
+    noBas = setdiff(1:n, Bx); % Índices de las variables no básicas
+    [R, idx] = max(r(noBas));
+    vin = noBas(idx);
+    
+    aj = A(:, vin);
+    d = backsub(U, forsub(L, aj(p)));
+
     condition = true;
-
     while condition
-        B = A(:,Bx);
-        % Factorizacion LU de la base
-        [L,U,p,~] = lups(B);
-
-        % Resolver B*xB = b
-        bp = b(p);
-        y = forsub(L,bp);
-        xB = backsub(U,y);
-
-        % Vector solucion completo
-        s = zeros(n,1);          % s = solución del problema
-        s(Bx) = xB;
-
-        % Costos basicos
-        cB = c(Bx);              % cB = costos de las variables basicas
-
-        % Resolver B' * lam = cB
-        w = backsub(U',cB);
-        lam = forsub(L',w);      % lam = multiplicadores simplex
-        % Costos reducidos
-        r = c - A'*lam;          % r = costos reducidos
-
-        % Variable que entra a la base
-        [~,input] = max(r);      % input = índice de variable entrante
-
-        % Dirección simplex  B*d = aj
-        aj = A(:,input);         % aj = columna a analizar
-        y = forsub(L,aj(p));
-        d = backsub(U,y);        % d = dirección simplex
-
+        % Se calcula xB para el test de razón
+        xB = backsub(U, forsub(L, b(p)));
         % Test de razón mínima
-        raz = xB ./ d;           % raz = razones para elegir variable que sale
-        raz(d <= eps) = inf;
-        [theta,output] = min(raz);   % output = índice de variable de salida
-
-        % Actualizar base y condición
-        Bx(output) = input;
-        condition = max(r) > eps && theta < inf;
+        razones = xB ./ d;
+        razones(d <= tol) = inf; 
+        [~, vout] = min(razones);      
+        % Actualizar la base
+        Bx(vout) = vin;
+        
+        % Se actualiza L
+        B = A(:, Bx);
+        [L, U, p] = lups(B);
+        
+        % Recalcular lam y r
+        cB = c(Bx);
+        w = forsub(U', cB);
+        v = backsub(L', w);
+        lambda = zeros(m, 1); lambda(p) = v;
+        r = c - A'*lambda;
+        noBas = setdiff(1:n, Bx);
+        [R, idx] = max(r(noBas));
+        vin = noBas(idx);
+        
+        % Actualizar d para la nueva variable de entrada y condición
+        aj = A(:, vin);
+        d = backsub(U, forsub(L, aj(p)));
+        condition = (R > tol) && any(d > tol);
     end
 
-    % Detectar problema no acotado
-    if theta == inf
-        error('El problema no está acotado')
+    % Manejo de acotamiento y múltiples soluciones
+    if (R > tol) && all(d <= tol)
+        error('El problema NO ESTÁ ACOTADO');
     end
-    % Detectar múltiples soluciones óptimas
-    noBas = setdiff(1:n,Bx);     % variables no básicas
-    if any(abs(r(noBas)) <= eps)
-        disp('Existen múltiples soluciones óptimas')
+    if any(abs(r(noBas)) < tol)
+        disp('Se han detectado múltiples soluciones óptimas');
     end
 
-    % Valor de la funcion objetivo
-    z = c'*s;
+    % Cálculo final con la base óptima encontrada
+    xB = backsub(U, forsub(L, b(p)));
+    s = zeros(n, 1);
+    s(Bx) = xB;
+    z = c' * s;
+    if z < 0
+        z=-z;
+    end
 end
